@@ -1,0 +1,31 @@
+[capital]
+total_usd = 100.0
+max_flash_bet_usd = 5.0
+max_standard_bet_usd = 10.0
+max_total_exposure_usd = 40.0
+daily_loss_limit_usd = 15.0
+
+[signal]
+flash_divergence_threshold_pct = 0.3
+flash_min_time_to_resolve_secs = 30
+flash_max_time_to_resolve_secs = 120
+standard_min_certainty = 70
+standard_high_certainty = 85
+standard_max_hours_to_resolve = 6.0
+standard_high_certainty_max_hours = 24.0
+
+[filters]
+flash_min_volume_usd = 500.0
+standard_min_volume_usd = 1000.0
+standard_min_yes_price = 0.10
+standard_max_yes_price = 0.45
+gamma_poll_interval_secs = 60
+
+[network]
+clob_url = "https://clob.polymarket.com"
+gamma_url = "https://gamma-api.polymarket.com"
+rtds_url = "wss://ws-live-data.polymarket.com"
+clob_ws_url = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+binance_ws_url = "wss://stream.binance.com:9443/ws/btcusdt@kline_1s"
+geoblock_url = "https://polymarket.com/api/geoblock"
+rtds_ping_interval_secs = 5

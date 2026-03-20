@@ -1,0 +1,13 @@
+# Rust
+/target
+
+# Secrets
+.env
+
+# Claude
+.claude/
+CLAUDE.md
+
+# Session state
+mantis-progress.txt
+mantis-errors.txt
