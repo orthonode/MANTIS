@@ -1,6 +1,11 @@
 mod config;
+mod feeds;
+mod markets;
 
 use anyhow::Result;
+use feeds::gamma::GammaFilters;
+use markets::state::{MarketEvent, MarketState};
+use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
 #[tokio::main]
@@ -49,7 +54,73 @@ async fn main() -> Result<()> {
         }
     }
 
-    info!("P1 scaffold complete. Feeds, signals, and trader not yet implemented.");
+    // Step 7: Init shared MarketState
+    let market_state = MarketState::new();
+    info!("MarketState initialised");
+
+    // Step 8: Init broadcast channel for MarketEvents (capacity 1024).
+    // Multiple consumers: signal task, trader task, dashboard task.
+    let (event_tx, _event_rx): (broadcast::Sender<MarketEvent>, _) =
+        broadcast::channel(1024);
+
+    // mpsc channel for CLOB WS token subscriptions (gamma → clob_ws).
+    let (clob_sub_tx, clob_sub_rx) = mpsc::channel::<Vec<String>>(64);
+
+    // Step 10: Spawn RTDS Binance feed — separate WS connection.
+    let (binance_tx, _binance_rx) =
+        broadcast::channel::<feeds::rtds_binance::BinanceTick>(256);
+    tokio::spawn(feeds::rtds_binance::run(
+        cfg.network.rtds_url.clone(),
+        cfg.network.rtds_ping_interval_secs,
+        binance_tx,
+    ));
+
+    // Step 11: Spawn RTDS Chainlink feed — SEPARATE WS connection from Binance.
+    // Critical: two symbols on one RTDS WS silently kills the first feed.
+    let (chainlink_tx, _chainlink_rx) =
+        broadcast::channel::<feeds::rtds_chainlink::ChainlinkTick>(256);
+    tokio::spawn(feeds::rtds_chainlink::run(
+        cfg.network.rtds_url.clone(),
+        cfg.network.rtds_ping_interval_secs,
+        chainlink_tx,
+    ));
+
+    // Step 12: Spawn CLOB WS feed.
+    let clob_state = market_state.clone();
+    let clob_event_tx = event_tx.clone();
+    tokio::spawn(feeds::clob_ws::run(
+        cfg.network.clob_ws_url.clone(),
+        clob_state,
+        clob_event_tx,
+        clob_sub_rx,
+    ));
+
+    // Step 13: Spawn Gamma poller (market discovery, 60s poll).
+    let gamma_state = market_state.clone();
+    let gamma_event_tx = event_tx.clone();
+    tokio::spawn(feeds::gamma::run(
+        cfg.network.gamma_url.clone(),
+        cfg.filters.gamma_poll_interval_secs,
+        gamma_state,
+        gamma_event_tx,
+        clob_sub_tx,
+        GammaFilters {
+            max_hours_to_resolution: 24.0,
+            min_flash_volume: cfg.filters.flash_min_volume_usd,
+            min_standard_volume: cfg.filters.standard_min_volume_usd,
+        },
+    ));
+
+    info!("P2 feeds spawned — Binance RTDS, Chainlink RTDS, CLOB WS, Gamma poll");
+    info!("Signal, trader, and dashboard not yet implemented. Waiting for Ctrl-C...");
+
+    // Step 17: Wait for clean shutdown signal.
+    tokio::signal::ctrl_c().await?;
+    info!("Ctrl-C received. Shutting down.");
+
+    // Step 18-20: Trader cancel_all + exit (implemented in P4).
+    // For now, exit cleanly.
+    info!("Clean shutdown. Goodbye.");
     Ok(())
 }
 
