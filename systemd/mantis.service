@@ -1,0 +1,35 @@
+[Unit]
+Description=MANTIS Polymarket Trading Agent
+Documentation=https://github.com/orthonode/MANTIS
+After=network-online.target
+Wants=network-online.target
+# Restart if any feed WS drops and the process exits unexpectedly.
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/mantis
+
+# Load secrets from .env file — never commit this file.
+EnvironmentFile=/home/ubuntu/mantis/.env
+
+# RUST_LOG controls tracing output. "mantis=info" is production default.
+# Use "mantis=debug" temporarily when diagnosing issues.
+Environment=RUST_LOG=mantis=info
+
+ExecStart=/home/ubuntu/mantis/target/release/mantis
+
+# Always restart — feeds disconnect, geoblock transient, etc.
+Restart=always
+RestartSec=5
+
+# Give the process 10s to cancel open orders on clean shutdown.
+TimeoutStopSec=10
+
+# Journal settings.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mantis
+
+[Install]
+WantedBy=multi-user.target

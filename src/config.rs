@@ -5,7 +5,7 @@ use serde::Deserialize;
 // ── Existing config sections ─────────────────────────────────────────────────
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct CapitalConfig {
     pub total_usd: Decimal,
     pub max_flash_bet_usd: Decimal,
@@ -15,7 +15,7 @@ pub struct CapitalConfig {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct SignalConfig {
     pub flash_divergence_threshold_pct: Decimal,
     pub flash_min_time_to_resolve_secs: u64,
@@ -27,7 +27,7 @@ pub struct SignalConfig {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct FiltersConfig {
     pub flash_min_volume_usd: Decimal,
     pub standard_min_volume_usd: Decimal,
@@ -37,7 +37,7 @@ pub struct FiltersConfig {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct NetworkConfig {
     pub clob_url: String,
     pub gamma_url: String,

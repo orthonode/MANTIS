@@ -143,14 +143,35 @@ async fn main() -> Result<()> {
         dashboard::tui::run(dash_state_clone, dash_market, dash_drawdown, dash_regime).await;
     });
 
-    info!("Regime detector and dashboard spawned. Waiting for Ctrl-C...");
+    // Step 15: Spawn trader task — signal detection + execution.
+    let trader_deps = trader::task::TaskDeps {
+        market_state: market_state.clone(),
+        event_rx: event_tx.subscribe(),
+        binance_rx: binance_tx.subscribe(),
+        chainlink_rx: chainlink_tx.subscribe(),
+        signal: cfg.signal.clone(),
+        filters: cfg.filters.clone(),
+        capital: cfg.capital.clone(),
+        kelly: cfg.kelly.clone(),
+        exit: cfg.exit.clone(),
+        ai: cfg.ai.clone(),
+        drawdown: drawdown.clone(),
+        regime: regime_state.clone(),
+        dash_state: dash_state.clone(),
+        groq_api_key: cfg.groq_api_key.clone(),
+        anthropic_api_key: cfg.anthropic_api_key.clone(),
+        private_key: cfg.private_key.clone(),
+        clob_url: cfg.network.clob_url.clone(),
+    };
+    tokio::spawn(trader::task::run(trader_deps));
+
+    info!("All tasks spawned — Binance, Chainlink, CLOB WS, Gamma, Regime, Trader, Dashboard");
+    info!("MANTIS is live. Waiting for Ctrl-C to shut down...");
 
     // Step 17: Wait for clean shutdown signal.
     tokio::signal::ctrl_c().await?;
-    info!("Ctrl-C received. Shutting down.");
+    info!("Ctrl-C received. Shutting down cleanly.");
 
-    // Step 18-20: Trader cancel_all + exit (implemented in P4).
-    // For now, exit cleanly.
     info!("Clean shutdown. Goodbye.");
     Ok(())
 }
