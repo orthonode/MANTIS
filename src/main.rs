@@ -1,4 +1,5 @@
 mod config;
+mod dashboard;
 mod feeds;
 mod markets;
 mod risk;
@@ -8,6 +9,8 @@ mod trader;
 use anyhow::Result;
 use feeds::gamma::GammaFilters;
 use markets::state::{MarketEvent, MarketState};
+use risk::drawdown::DrawdownTracker;
+use risk::regime::RegimeState;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
@@ -75,7 +78,7 @@ async fn main() -> Result<()> {
     tokio::spawn(feeds::rtds_binance::run(
         cfg.network.rtds_url.clone(),
         cfg.network.rtds_ping_interval_secs,
-        binance_tx,
+        binance_tx.clone(),
     ));
 
     // Step 11: Spawn RTDS Chainlink feed — SEPARATE WS connection from Binance.
@@ -85,7 +88,7 @@ async fn main() -> Result<()> {
     tokio::spawn(feeds::rtds_chainlink::run(
         cfg.network.rtds_url.clone(),
         cfg.network.rtds_ping_interval_secs,
-        chainlink_tx,
+        chainlink_tx.clone(),
     ));
 
     // Step 12: Spawn CLOB WS feed.
@@ -115,7 +118,32 @@ async fn main() -> Result<()> {
     ));
 
     info!("P2 feeds spawned — Binance RTDS, Chainlink RTDS, CLOB WS, Gamma poll");
-    info!("Signal, trader, and dashboard not yet implemented. Waiting for Ctrl-C...");
+
+    // Step 14: Init DrawdownTracker + RegimeState.
+    let drawdown = DrawdownTracker::new(cfg.capital.total_usd);
+    let regime_state = RegimeState::new();
+
+    // Spawn regime detector — reads from both RTDS feeds every 30s.
+    tokio::spawn(risk::regime::run(
+        binance_tx.subscribe(),
+        chainlink_tx.subscribe(),
+        regime_state.clone(),
+        cfg.regime.clone(),
+    ));
+
+    // Step 16: Init shared dashboard state and spawn TUI task.
+    let dash_state = std::sync::Arc::new(std::sync::Mutex::new(
+        dashboard::tui::DashboardState::new(cfg.capital.total_usd),
+    ));
+    let dash_market = market_state.clone();
+    let dash_drawdown = drawdown.clone();
+    let dash_regime = regime_state.clone();
+    let dash_state_clone = dash_state.clone();
+    tokio::spawn(async move {
+        dashboard::tui::run(dash_state_clone, dash_market, dash_drawdown, dash_regime).await;
+    });
+
+    info!("Regime detector and dashboard spawned. Waiting for Ctrl-C...");
 
     // Step 17: Wait for clean shutdown signal.
     tokio::signal::ctrl_c().await?;
