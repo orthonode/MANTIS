@@ -3,6 +3,7 @@ mod feeds;
 mod markets;
 mod risk;
 mod signal;
+mod trader;
 
 use anyhow::Result;
 use feeds::gamma::GammaFilters;
