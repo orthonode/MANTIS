@@ -272,6 +272,13 @@ pub struct DashboardState {
 
     // ── Status log
     pub log_entries: VecDeque<LogEntry>,
+
+    // ── Arb scanner
+    pub arb_opportunities_found: u32,
+
+    // ── Maker stats
+    pub maker_spread_profit: Decimal,
+    pub maker_rebate_today: Decimal,
 }
 
 impl DashboardState {
@@ -308,6 +315,9 @@ impl DashboardState {
             conn_groq: false,
             conn_claude: false,
             log_entries: VecDeque::with_capacity(100),
+            arb_opportunities_found: 0,
+            maker_spread_profit: Decimal::ZERO,
+            maker_rebate_today: Decimal::ZERO,
         }
     }
 

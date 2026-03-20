@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
-// ── Existing config sections ─────────────────────────────────────────────────
+// ── Capital ───────────────────────────────────────────────────────────────────
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
@@ -14,27 +14,33 @@ pub struct CapitalConfig {
     pub daily_loss_limit_usd: Decimal,
 }
 
+// ── Standard signal engine (non-fee markets: politics, macro) ─────────────────
+
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
-pub struct SignalConfig {
-    pub flash_divergence_threshold_pct: Decimal,
-    pub flash_min_time_to_resolve_secs: u64,
-    pub flash_max_time_to_resolve_secs: u64,
-    pub standard_min_certainty: u8,
-    pub standard_high_certainty: u8,
-    pub standard_max_hours_to_resolve: Decimal,
-    pub standard_high_certainty_max_hours: Decimal,
+pub struct StandardConfig {
+    pub enabled: bool,
+    pub min_consensus_score: u8,
+    pub min_volume_usd: Decimal,
+    pub min_yes_price: Decimal,
+    pub max_yes_price: Decimal,
+    pub max_hours_to_resolve: Decimal,
+    pub high_certainty_score: u8,
+    pub high_certainty_max_hours: Decimal,
 }
+
+// ── Filters ───────────────────────────────────────────────────────────────────
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct FiltersConfig {
-    pub flash_min_volume_usd: Decimal,
     pub standard_min_volume_usd: Decimal,
     pub standard_min_yes_price: Decimal,
     pub standard_max_yes_price: Decimal,
     pub gamma_poll_interval_secs: u64,
 }
+
+// ── Network ───────────────────────────────────────────────────────────────────
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
@@ -45,107 +51,142 @@ pub struct NetworkConfig {
     pub clob_ws_url: String,
     pub binance_ws_url: String,
     pub geoblock_url: String,
+    pub data_api_url: String,
     pub rtds_ping_interval_secs: u64,
 }
 
-// ── New upgrade config sections ──────────────────────────────────────────────
+// ── Kelly ─────────────────────────────────────────────────────────────────────
 
-/// Fractional Kelly bet sizing parameters.
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct KellyConfig {
-    /// Hard cap: never bet more than this fraction of bankroll per trade.
     pub max_fraction: Decimal,
-    /// Hard floor: minimum bet size in USD.
     pub min_bet_usd: Decimal,
-    /// Category multiplier for Flash BTC/ETH markets.
     pub flash_category_mult: Decimal,
-    /// Category multiplier for standard (non-flash) markets.
     pub standard_category_mult: Decimal,
-    /// Category multiplier for political/governance markets.
     pub political_category_mult: Decimal,
 }
 
-/// Market regime detection thresholds.
+// ── Regime ────────────────────────────────────────────────────────────────────
+
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct RegimeConfig {
-    /// BTC/ETH price swing % within 5 minutes that triggers VOLATILE regime.
     pub volatile_threshold_pct: Decimal,
-    /// Volume spike ratio (vs 10-min avg) that triggers BREAKING regime.
     pub breaking_volume_multiplier: Decimal,
-    /// Seconds to pause new Flash orders during a BREAKING regime.
     pub flash_pause_on_breaking_secs: u64,
 }
 
-/// Dynamic position exit parameters.
+// ── Exit ──────────────────────────────────────────────────────────────────────
+
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct ExitConfig {
-    /// Activate trailing stop once position is up this fraction of max profit.
     pub profit_lock_threshold: Decimal,
-    /// Exit if price reverses this fraction from the peak profit point.
     pub trailing_stop_reversal: Decimal,
-    /// Seconds between Groq re-scores while a position is open.
     pub groq_rescore_interval_secs: u64,
-    /// Exit a losing position if <5 min to resolution and loss exceeds this fraction.
     pub losing_exit_threshold: Decimal,
 }
 
-/// Dual-AI signal configuration.
+// ── AI ────────────────────────────────────────────────────────────────────────
+
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct AiConfig {
-    /// Groq model identifier.
     pub groq_model: String,
-    /// Minimum Groq score to proceed to Claude deep-verify.
     pub groq_min_score: u8,
-    /// Claude model identifier.
     pub claude_model: String,
-    /// Minimum combined consensus score to fire a trade.
     pub consensus_min_score: u8,
-    /// Weight applied to Groq score in consensus calculation.
     pub consensus_groq_weight: Decimal,
-    /// Weight applied to Claude score in consensus calculation.
     pub consensus_claude_weight: Decimal,
 }
 
-// ── Internal TOML deserialisation target ────────────────────────────────────
+// ── Maker (market-making engine on 5-min/15-min crypto markets) ───────────────
 
-/// Fields loaded from config.toml only (no secrets).
+#[allow(dead_code)]
+#[derive(Debug, Deserialize, Clone)]
+pub struct MakerConfig {
+    pub enabled: bool,
+    /// Base spread in probability units (e.g. 0.025 = 2.5 cents).
+    pub target_spread_pct: Decimal,
+    /// Flatten inventory aggressively when imbalance exceeds this share count.
+    pub max_imbalance_shares: Decimal,
+    /// Cancel ALL maker orders this many seconds before resolution. Hard rule.
+    pub cancel_before_resolution_secs: u64,
+    /// Target milliseconds for a full cancel+replace cycle.
+    pub replace_loop_ms: u64,
+    /// Only quote markets with total volume above this USD threshold.
+    pub min_market_volume_usd: Decimal,
+    /// Max USD per side (bid or ask) in any single market.
+    pub max_per_side_usd: Decimal,
+    /// Skip entering markets where yes_price is in the high-fee zone [min, max].
+    pub skip_probability_min: Decimal,
+    pub skip_probability_max: Decimal,
+    /// Spread multiplier when 1-minute volatility exceeds 0.5%.
+    pub volatility_spread_mult: Decimal,
+    /// Spread multiplier when time_to_resolution < 60s.
+    pub low_time_spread_mult_60s: Decimal,
+    /// Spread multiplier when time_to_resolution < 30s.
+    pub low_time_spread_mult_30s: Decimal,
+}
+
+// ── Arb (Kalshi cross-platform arbitrage) ─────────────────────────────────────
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize, Clone)]
+pub struct ArbConfig {
+    /// When false: scanner runs in alert-only mode. No orders placed.
+    pub enabled: bool,
+    /// Minimum locked profit per dollar deployed to fire an arb trade.
+    pub min_locked_profit: Decimal,
+    /// Both legs must have at least this volume to ensure fills.
+    pub min_market_volume: Decimal,
+    /// Maximum USD deployed per arb pair.
+    pub max_position_usd: Decimal,
+    /// How often to poll the Kalshi API.
+    pub kalshi_poll_interval_secs: u64,
+}
+
+// ── Internal TOML target ──────────────────────────────────────────────────────
+
 #[derive(Debug, Deserialize)]
 struct TomlConfig {
     pub capital: CapitalConfig,
-    pub signal: SignalConfig,
+    pub standard: StandardConfig,
     pub filters: FiltersConfig,
     pub network: NetworkConfig,
     pub kelly: KellyConfig,
     pub regime: RegimeConfig,
     pub exit: ExitConfig,
     pub ai: AiConfig,
+    pub maker: MakerConfig,
+    pub arb: ArbConfig,
 }
 
-// ── Runtime config ───────────────────────────────────────────────────────────
+// ── Runtime config ────────────────────────────────────────────────────────────
 
-/// Full runtime config: TOML strategy params + env secrets.
-/// Constructed once in `main.rs` and passed (by clone or Arc) to tasks.
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct Config {
     pub capital: CapitalConfig,
-    pub signal: SignalConfig,
+    pub standard: StandardConfig,
     pub filters: FiltersConfig,
     pub network: NetworkConfig,
     pub kelly: KellyConfig,
     pub regime: RegimeConfig,
     pub exit: ExitConfig,
     pub ai: AiConfig,
+    pub maker: MakerConfig,
+    pub arb: ArbConfig,
     /// Polygon EOA private key — from .env, never logged.
     pub private_key: String,
     /// Anthropic API key — from .env, never logged.
     pub anthropic_api_key: String,
     /// Groq API key — from .env, never logged.
     pub groq_api_key: String,
+    /// Kalshi credentials — from .env, never logged.
+    pub kalshi_email: String,
+    pub kalshi_password: String,
 }
 
 impl Config {
@@ -158,6 +199,9 @@ impl Config {
             std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY not set in .env")?;
         let groq_api_key =
             std::env::var("GROQ_API_KEY").context("GROQ_API_KEY not set in .env")?;
+        // Kalshi creds optional — arb runs in alert-only mode without them.
+        let kalshi_email = std::env::var("KALSHI_EMAIL").unwrap_or_default();
+        let kalshi_password = std::env::var("KALSHI_PASSWORD").unwrap_or_default();
 
         let raw = config::Config::builder()
             .add_source(config::File::with_name("config"))
@@ -168,16 +212,20 @@ impl Config {
 
         Ok(Config {
             capital: toml.capital,
-            signal: toml.signal,
+            standard: toml.standard,
             filters: toml.filters,
             network: toml.network,
             kelly: toml.kelly,
             regime: toml.regime,
             exit: toml.exit,
             ai: toml.ai,
+            maker: toml.maker,
+            arb: toml.arb,
             private_key,
             anthropic_api_key,
             groq_api_key,
+            kalshi_email,
+            kalshi_password,
         })
     }
 }

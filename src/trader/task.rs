@@ -22,19 +22,20 @@
 //!   Zero unwrap() — all errors logged, task continues.
 //!   P&L computed as: profit = size_usd * (1/entry_price - 1) if win, -size_usd if loss.
 
-use crate::config::{AiConfig, CapitalConfig, ExitConfig, FiltersConfig, KellyConfig, SignalConfig};
+use crate::config::{AiConfig, CapitalConfig, ExitConfig, KellyConfig, StandardConfig};
 use crate::dashboard::tui::{LogEntry, SharedDashState, SignalLogEntry};
 use crate::feeds::rtds_binance::BinanceTick;
 use crate::feeds::rtds_chainlink::ChainlinkTick;
+use crate::maker::fee::FeeCache;
 use crate::markets::state::{MarketEvent, MarketState, MarketType};
 use crate::risk::drawdown::DrawdownTracker;
 use crate::risk::kelly::{self, KellyMultipliers};
 use crate::risk::regime::RegimeState;
 use crate::signal::consensus::{self, MarketContext};
-use crate::signal::flash::{self, FlashDirection, FlashParams};
 use crate::trader::executor::{cancel_all_orders, place_order, OpenPosition};
 use crate::trader::monitor::{run as monitor_run, ExitReason, MonitorDeps};
 use crate::trader::risk::{self as risk_gate, ProposedOrder, RiskContext};
+use reqwest::Client;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::time::Duration;
@@ -50,12 +51,12 @@ pub struct TaskDeps {
     pub event_rx: broadcast::Receiver<MarketEvent>,
     pub binance_rx: broadcast::Receiver<BinanceTick>,
     pub chainlink_rx: broadcast::Receiver<ChainlinkTick>,
-    pub signal: SignalConfig,
-    pub filters: FiltersConfig,
+    pub standard: StandardConfig,
     pub capital: CapitalConfig,
     pub kelly: KellyConfig,
     pub exit: ExitConfig,
     pub ai: AiConfig,
+    pub fee_cache: FeeCache,
     pub drawdown: DrawdownTracker,
     pub regime: RegimeState,
     pub dash_state: SharedDashState,
@@ -72,13 +73,13 @@ pub struct TaskDeps {
 /// Exits cleanly only when the tokio runtime shuts down (Ctrl-C).
 /// Never panics — all errors are logged and the loop continues.
 pub async fn run(mut deps: TaskDeps) {
-    let client = reqwest::Client::new();
+    let client = Client::new();
     let mut open_positions: Vec<OpenPosition> = vec![];
 
     // Channel: monitor tasks → this task (exit notifications).
     let (exit_tx, mut exit_rx) = mpsc::channel::<(String, ExitReason)>(32);
 
-    // Cache latest RTDS ticks for flash evaluation.
+    // Cache latest RTDS ticks for dashboard BTC price display.
     let mut latest_binance: Option<BinanceTick> = None;
     let mut latest_chainlink: Option<ChainlinkTick> = None;
 
@@ -86,11 +87,11 @@ pub async fn run(mut deps: TaskDeps) {
     let mut std_timer = time::interval(Duration::from_secs(300));
     std_timer.tick().await; // discard the immediate first tick
 
-    info!("Trader task started");
+    info!("Trader task started — standard AI markets (non-fee only)");
 
     loop {
         tokio::select! {
-            // ── Update RTDS price cache ──────────────────────────────────────
+            // ── Update RTDS price display on dashboard ───────────────────────
             Ok(tick) = deps.binance_rx.recv() => {
                 if let Ok(mut d) = deps.dash_state.lock() {
                     let cl_price = latest_chainlink.as_ref().map(|t| t.price).unwrap_or(0.0);
@@ -118,20 +119,10 @@ pub async fn run(mut deps: TaskDeps) {
             // ── Market events ────────────────────────────────────────────────
             result = deps.event_rx.recv() => {
                 match result {
-                    Ok(MarketEvent::PriceUpdate { condition_id, .. }) => {
-                        // Flash path: only if we have both RTDS prices.
-                        if let (Some(bn), Some(cl)) = (&latest_binance, &latest_chainlink) {
-                            try_flash_trade(
-                                &condition_id,
-                                bn,
-                                cl,
-                                &deps,
-                                &client,
-                                &mut open_positions,
-                                exit_tx.clone(),
-                            )
-                            .await;
-                        }
+                    Ok(MarketEvent::PriceUpdate { .. }) => {
+                        // Flash taker path removed (Feb 18, 2026 fee changes).
+                        // Price updates now only serve the maker engine and
+                        // the dashboard RTDS display (handled above).
                     }
 
                     Ok(MarketEvent::MarketResolved { condition_id, outcome }) => {
@@ -143,7 +134,7 @@ pub async fn run(mut deps: TaskDeps) {
                         );
                     }
 
-                    Ok(_) => {} // BestBidAsk, NewMarket — no action needed here
+                    Ok(_) => {}
 
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         warn!("Trader task: event_rx lagged — skipped {n} events");
@@ -162,7 +153,9 @@ pub async fn run(mut deps: TaskDeps) {
 
             // ── Standard market scan (every 5 minutes) ───────────────────────
             _ = std_timer.tick() => {
-                try_standard_trades(&deps, &client, &mut open_positions, exit_tx.clone()).await;
+                if deps.standard.enabled {
+                    try_standard_trades(&deps, &client, &mut open_positions, exit_tx.clone()).await;
+                }
             }
         }
     }
@@ -172,120 +165,11 @@ pub async fn run(mut deps: TaskDeps) {
     cancel_all_orders(&open_positions, &deps.clob_url, &deps.private_key).await;
 }
 
-// ── Flash path ────────────────────────────────────────────────────────────────
-
-async fn try_flash_trade(
-    condition_id: &str,
-    binance: &BinanceTick,
-    chainlink: &ChainlinkTick,
-    deps: &TaskDeps,
-    client: &reqwest::Client,
-    open_positions: &mut Vec<OpenPosition>,
-    exit_tx: mpsc::Sender<(String, ExitReason)>,
-) {
-    let snap = match deps.market_state.markets.get(condition_id) {
-        Some(s) => s.clone(),
-        None => return,
-    };
-
-    // Only Flash markets on this path.
-    if snap.market_type != MarketType::Flash {
-        return;
-    }
-
-    let params = FlashParams {
-        threshold_pct: deps.signal.flash_divergence_threshold_pct,
-        min_secs_to_resolve: deps.signal.flash_min_time_to_resolve_secs,
-        max_secs_to_resolve: deps.signal.flash_max_time_to_resolve_secs,
-        min_volume: deps.filters.flash_min_volume_usd,
-    };
-
-    let signal = match flash::evaluate(&snap, binance, chainlink, &params, &deps.regime) {
-        Some(s) => s,
-        None => return,
-    };
-
-    let direction = match signal.direction {
-        FlashDirection::Yes => "YES",
-        FlashDirection::No => "NO",
-    };
-
-    let implied_edge = flash::implied_edge(snap.yes_price, &signal.direction);
-    let win_prob = Decimal::ONE - snap.yes_price + implied_edge / dec!(2);
-
-    let open_exposure: Decimal = open_positions.iter().map(|p| p.size_usd).sum();
-    let (today_pnl, bankroll) = {
-        let d = deps.dash_state.lock().unwrap();
-        (d.today_pnl, d.bankroll)
-    };
-
-    let spread = snap.spread().unwrap_or(dec!(0.05));
-    let dd_mult = deps.drawdown.multiplier();
-    let multipliers = KellyMultipliers {
-        confidence: kelly::confidence_mult(70, 0), // flash: no AI score, use baseline
-        drawdown: dd_mult,
-        timeline: kelly::timeline_mult(signal.seconds_to_resolution),
-        volatility: deps.regime.current().kelly_volatility_mult(),
-        regime: deps.regime.current().kelly_regime_mult(),
-        liquidity: kelly::liquidity_mult(spread),
-        category: deps.kelly.flash_category_mult,
-    };
-
-    let proposed = ProposedOrder {
-        condition_id: condition_id.to_string(),
-        market_type: MarketType::Flash,
-        direction: direction.to_string(),
-        yes_price: snap.yes_price,
-        volume: snap.volume,
-    };
-
-    let ctx = RiskContext {
-        open_exposure_usd: open_exposure,
-        today_pnl_usd: today_pnl,
-        bankroll_usd: bankroll,
-        open_condition_ids: open_positions.iter().map(|p| p.condition_id.clone()).collect(),
-        kelly_multipliers: multipliers,
-        win_prob,
-    };
-
-    match risk_gate::check(&proposed, &ctx, &deps.capital, &deps.kelly) {
-        Ok(approved) => {
-            execute_and_monitor(
-                approved.condition_id.clone(),
-                approved.direction.clone(),
-                approved.yes_price,
-                approved.bet_size_usd,
-                open_positions,
-                deps,
-                client,
-                exit_tx,
-                Some(70),
-                None,
-                approved.bet_size_usd,
-                "FLASH".to_string(),
-            )
-            .await;
-        }
-        Err(e) => {
-            log_signal(
-                deps,
-                condition_id,
-                Some(70),
-                None,
-                None,
-                None,
-                "REJECTED",
-            );
-            info!(condition_id, reason = %e, "Flash trade rejected by risk gate");
-        }
-    }
-}
-
 // ── Standard path ─────────────────────────────────────────────────────────────
 
 async fn try_standard_trades(
     deps: &TaskDeps,
-    client: &reqwest::Client,
+    client: &Client,
     open_positions: &mut Vec<OpenPosition>,
     exit_tx: mpsc::Sender<(String, ExitReason)>,
 ) {
@@ -297,7 +181,7 @@ async fn try_standard_trades(
         .filter_map(|entry| {
             let snap = entry.value();
 
-            // Standard markets only.
+            // Standard markets only (non-Flash markets resolve by news/events).
             if snap.market_type != MarketType::Standard {
                 return None;
             }
@@ -309,18 +193,18 @@ async fn try_standard_trades(
                 return None;
             }
             // Volume filter.
-            if snap.volume < deps.filters.standard_min_volume_usd {
+            if snap.volume < deps.standard.min_volume_usd {
                 return None;
             }
             // YES price filter (avoid heavy favourites).
-            if snap.yes_price < deps.filters.standard_min_yes_price
-                || snap.yes_price > deps.filters.standard_max_yes_price
+            if snap.yes_price < deps.standard.min_yes_price
+                || snap.yes_price > deps.standard.max_yes_price
             {
                 return None;
             }
             // Time window filter.
             let hours = snap.seconds_to_resolution() as f64 / 3600.0;
-            let max_hours = deps.signal.standard_max_hours_to_resolve
+            let max_hours = deps.standard.max_hours_to_resolve
                 .to_string()
                 .parse::<f64>()
                 .unwrap_or(6.0);
@@ -342,6 +226,24 @@ async fn try_standard_trades(
         // Re-check position wasn't opened mid-scan.
         if open_positions.iter().any(|p| p.condition_id == snap.condition_id) {
             continue;
+        }
+
+        // FEE GATE: skip markets with taker fees — route to maker engine instead.
+        // Fee markets (5-min/15-min crypto) have feeRateBps > 0 from Feb 18, 2026.
+        match deps.fee_cache.get_fee_bps(client, &snap.condition_id).await {
+            Ok(bps) if bps > 0 => {
+                info!(
+                    condition_id = %snap.condition_id,
+                    fee_bps = bps,
+                    "Standard scan: fee market — routing to maker engine, skipping taker"
+                );
+                continue;
+            }
+            Err(e) => {
+                warn!(condition_id = %snap.condition_id, "Fee fetch failed: {e} — skipping market");
+                continue;
+            }
+            Ok(_) => {} // fee_bps == 0: zero-fee market, safe to take
         }
 
         let hours = snap.seconds_to_resolution() as f64 / 3600.0;
@@ -536,12 +438,8 @@ async fn execute_and_monitor(
         let bk = dash.bankroll;
         dash.record_equity(bk);
         dash.pipeline_placed = dash.pipeline_placed.saturating_add(1);
-        // Update category counters (will be confirmed at resolution).
-        if market_kind == "FLASH" {
-            dash.flash_total += 1;
-        } else {
-            dash.standard_total += 1;
-        }
+        // All directional trades are now STANDARD (no flash taker path).
+        dash.standard_total += 1;
         dash.push_log(LogEntry::info(format!(
             "Trade placed: {condition_id:.8} {direction} ${kelly_size:.2} [{market_kind}]"
         )));
@@ -612,26 +510,10 @@ fn settle_resolution(
 
         // Determine market type from position for category tracking.
         // We track wins here at settlement; totals were incremented at placement.
-        let is_flash = open_positions
-            .iter()
-            .find(|p| p.condition_id == condition_id)
-            .map(|_| {
-                deps.market_state
-                    .markets
-                    .get(condition_id)
-                    .map(|s| s.market_type == MarketType::Flash)
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
-
         if won {
             dash.wins += 1;
             dash.gross_wins += pnl;
-            if is_flash {
-                dash.flash_wins += 1;
-            } else {
-                dash.standard_wins += 1;
-            }
+            dash.standard_wins += 1;
         } else {
             dash.gross_losses += pnl.abs();
         }

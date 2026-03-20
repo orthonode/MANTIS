@@ -66,10 +66,8 @@ struct GammaToken {
 pub struct GammaFilters {
     /// Maximum hours to resolution to include a market.
     pub max_hours_to_resolution: f64,
-    /// Minimum USD volume for Flash markets.
-    pub min_flash_volume: Decimal,
-    /// Minimum USD volume for Standard markets.
-    pub min_standard_volume: Decimal,
+    /// Minimum USD volume — used for all market types.
+    pub min_volume: Decimal,
 }
 
 // ── Run the gamma poll task ───────────────────────────────────────────────────
@@ -215,11 +213,7 @@ async fn process_market(
     let market_type = classify_market(&question);
 
     // Apply volume filter.
-    let min_volume = match market_type {
-        MarketType::Flash => filters.min_flash_volume,
-        MarketType::Standard => filters.min_standard_volume,
-    };
-    if volume < min_volume {
+    if volume < filters.min_volume {
         return None;
     }
 
