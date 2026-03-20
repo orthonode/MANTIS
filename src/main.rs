@@ -1,6 +1,8 @@
 mod config;
 mod feeds;
 mod markets;
+mod risk;
+mod signal;
 
 use anyhow::Result;
 use feeds::gamma::GammaFilters;

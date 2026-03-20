@@ -29,3 +29,29 @@ clob_ws_url = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 binance_ws_url = "wss://stream.binance.com:9443/ws/btcusdt@kline_1s"
 geoblock_url = "https://polymarket.com/api/geoblock"
 rtds_ping_interval_secs = 5
+
+[kelly]
+max_fraction = 0.15       # never bet more than 15% of bankroll per trade
+min_bet_usd = 1.00
+flash_category_mult = 1.1
+standard_category_mult = 0.9
+political_category_mult = 0.7
+
+[regime]
+volatile_threshold_pct = 1.0     # price swing % in 5min to trigger VOLATILE
+breaking_volume_multiplier = 3.0  # volume spike ratio to trigger BREAKING
+flash_pause_on_breaking_secs = 60
+
+[exit]
+profit_lock_threshold = 0.40    # activate trailing stop after 40% of max profit
+trailing_stop_reversal = 0.15   # exit if price reverses 15% from peak
+groq_rescore_interval_secs = 60 # how often to re-score open positions
+losing_exit_threshold = 0.20    # exit losing position if <5min and >20% down
+
+[ai]
+groq_model = "llama-4-scout-17b-16e-instruct"
+groq_min_score = 55             # minimum Groq score to even call Claude
+claude_model = "claude-sonnet-4-20250514"
+consensus_min_score = 68        # minimum combined score to trade
+consensus_groq_weight = 0.4
+consensus_claude_weight = 0.6
