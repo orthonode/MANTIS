@@ -58,7 +58,9 @@ impl ArbOpportunity {
             kalshi_yes_price,
             combined_cost,
             locked_profit,
-            description: format!("BUY YES on Poly@{poly_yes_price:.2} + NO on Kalshi@{kalshi_no_price:.2}"),
+            description: format!(
+                "BUY YES on Poly@{poly_yes_price:.2} + NO on Kalshi@{kalshi_no_price:.2}"
+            ),
         }
     }
 
@@ -79,7 +81,9 @@ impl ArbOpportunity {
             kalshi_yes_price,
             combined_cost,
             locked_profit,
-            description: format!("BUY NO on Poly@{poly_no_price:.2} + YES on Kalshi@{kalshi_yes_price:.2}"),
+            description: format!(
+                "BUY NO on Poly@{poly_no_price:.2} + YES on Kalshi@{kalshi_yes_price:.2}"
+            ),
         }
     }
 }
@@ -116,7 +120,13 @@ pub async fn run(deps: ArbScannerDeps) {
             .markets
             .iter()
             .filter(|e| !e.value().is_closed)
-            .map(|e| (e.key().clone(), e.value().question.clone(), e.value().yes_price))
+            .map(|e| {
+                (
+                    e.key().clone(),
+                    e.value().question.clone(),
+                    e.value().yes_price,
+                )
+            })
             .collect();
 
         // Build keyword list from market questions (top 5 words from each).
@@ -219,7 +229,11 @@ async fn handle_opportunity(opp: ArbOpportunity, deps: &ArbScannerDeps, http: &C
 
 /// Execute both legs of an arb trade simultaneously.
 /// Paper stub — requires real SDK auth + Kalshi order API.
-async fn execute_arb(opp: &ArbOpportunity, _deps: &ArbScannerDeps, _http: &Client) -> anyhow::Result<()> {
+async fn execute_arb(
+    opp: &ArbOpportunity,
+    _deps: &ArbScannerDeps,
+    _http: &Client,
+) -> anyhow::Result<()> {
     // TODO(ARB): actual execution:
     //   1. Place limit BUY on Polymarket at opp.poly_yes_price or opp.poly_no_price
     //   2. Simultaneously place BUY on Kalshi at the other side
@@ -241,10 +255,7 @@ fn titles_match(kalshi_title: &str, poly_question: &str) -> bool {
     let p_lower = poly_question.to_lowercase();
 
     // Extract words > 4 chars from Kalshi title.
-    let k_words: Vec<&str> = k_lower
-        .split_whitespace()
-        .filter(|w| w.len() > 4)
-        .collect();
+    let k_words: Vec<&str> = k_lower.split_whitespace().filter(|w| w.len() > 4).collect();
 
     if k_words.is_empty() {
         return false;
@@ -296,7 +307,10 @@ mod tests {
 
     #[test]
     fn title_match_works() {
-        assert!(titles_match("Federal Reserve raises interest rates", "Will the Federal Reserve raise interest rates?"));
+        assert!(titles_match(
+            "Federal Reserve raises interest rates",
+            "Will the Federal Reserve raise interest rates?"
+        ));
         assert!(!titles_match("Bitcoin price", "Ethereum network upgrade"));
     }
 }

@@ -161,7 +161,10 @@ pub async fn run(mut deps: TaskDeps) {
     }
 
     // Reached only on shutdown — cancel all open orders.
-    info!("Trader task shutting down — cancelling {} open positions", open_positions.len());
+    info!(
+        "Trader task shutting down — cancelling {} open positions",
+        open_positions.len()
+    );
     cancel_all_orders(&open_positions, &deps.clob_url, &deps.private_key).await;
 }
 
@@ -189,7 +192,10 @@ async fn try_standard_trades(
             if snap.is_closed {
                 return None;
             }
-            if open_positions.iter().any(|p| p.condition_id == snap.condition_id) {
+            if open_positions
+                .iter()
+                .any(|p| p.condition_id == snap.condition_id)
+            {
                 return None;
             }
             // Volume filter.
@@ -204,7 +210,9 @@ async fn try_standard_trades(
             }
             // Time window filter.
             let hours = snap.seconds_to_resolution() as f64 / 3600.0;
-            let max_hours = deps.standard.max_hours_to_resolve
+            let max_hours = deps
+                .standard
+                .max_hours_to_resolve
                 .to_string()
                 .parse::<f64>()
                 .unwrap_or(6.0);
@@ -224,7 +232,10 @@ async fn try_standard_trades(
 
     for snap in candidates {
         // Re-check position wasn't opened mid-scan.
-        if open_positions.iter().any(|p| p.condition_id == snap.condition_id) {
+        if open_positions
+            .iter()
+            .any(|p| p.condition_id == snap.condition_id)
+        {
             continue;
         }
 
@@ -328,7 +339,10 @@ async fn try_standard_trades(
             open_exposure_usd: open_exposure,
             today_pnl_usd: today_pnl,
             bankroll_usd: bankroll,
-            open_condition_ids: open_positions.iter().map(|p| p.condition_id.clone()).collect(),
+            open_condition_ids: open_positions
+                .iter()
+                .map(|p| p.condition_id.clone())
+                .collect(),
             kelly_multipliers: multipliers,
             win_prob,
         };
@@ -402,7 +416,14 @@ async fn execute_and_monitor(
         bet_size_usd: bet_size,
     };
 
-    let position = match place_order(&approved, &deps.market_state, &deps.clob_url, &deps.private_key).await {
+    let position = match place_order(
+        &approved,
+        &deps.market_state,
+        &deps.clob_url,
+        &deps.private_key,
+    )
+    .await
+    {
         Ok(p) => p,
         Err(e) => {
             error!(condition_id, "place_order failed: {e}");
@@ -477,7 +498,10 @@ fn settle_resolution(
     open_positions: &mut Vec<OpenPosition>,
     deps: &TaskDeps,
 ) {
-    let pos = match open_positions.iter().find(|p| p.condition_id == condition_id) {
+    let pos = match open_positions
+        .iter()
+        .find(|p| p.condition_id == condition_id)
+    {
         Some(p) => p.clone(),
         None => return, // no position in this market
     };
@@ -548,7 +572,10 @@ fn handle_exit(
     deps: &TaskDeps,
 ) {
     // Find position — monitor already called cancel_order.
-    let pos = match open_positions.iter().find(|p| p.condition_id == condition_id) {
+    let pos = match open_positions
+        .iter()
+        .find(|p| p.condition_id == condition_id)
+    {
         Some(p) => p.clone(),
         None => return,
     };
@@ -626,10 +653,7 @@ fn log_signal(
     let ts = chrono::Utc::now().format("%H:%M:%S").to_string();
     let entry = SignalLogEntry {
         time: ts,
-        market_slug: condition_id
-            .chars()
-            .take(18)
-            .collect::<String>(),
+        market_slug: condition_id.chars().take(18).collect::<String>(),
         groq_score: groq,
         claude_score: claude,
         consensus_score: consensus,

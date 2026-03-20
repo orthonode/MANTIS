@@ -14,7 +14,7 @@
 
 use anyhow::Result;
 use rust_decimal::Decimal;
-use tokio::time::{Duration, interval};
+use tokio::time::{interval, Duration};
 use tracing::info;
 
 use crate::maker::inventory::InventoryTracker;
@@ -22,11 +22,7 @@ use crate::maker::inventory::InventoryTracker;
 // ── Merger task ───────────────────────────────────────────────────────────────
 
 /// Entry point — spawn via `tokio::spawn(trader::merger::run(...))`.
-pub async fn run(
-    inventory: InventoryTracker,
-    clob_url: String,
-    private_key: String,
-) {
+pub async fn run(inventory: InventoryTracker, clob_url: String, private_key: String) {
     info!("Position merger started — checking every 30s");
     let mut timer = interval(Duration::from_secs(30));
 
@@ -36,11 +32,7 @@ pub async fn run(
     }
 }
 
-async fn run_merge_cycle(
-    inventory: &InventoryTracker,
-    clob_url: &str,
-    private_key: &str,
-) {
+async fn run_merge_cycle(inventory: &InventoryTracker, clob_url: &str, private_key: &str) {
     for condition_id in inventory.active_markets() {
         let snap = inventory.snapshot(&condition_id);
         let pairs = snap.mergeable_pairs();

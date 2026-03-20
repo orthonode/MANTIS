@@ -74,15 +74,13 @@ async fn main() -> Result<()> {
     info!("MarketState initialised");
 
     // Step 6: Init broadcast channel for MarketEvents (capacity 1024).
-    let (event_tx, _event_rx): (broadcast::Sender<MarketEvent>, _) =
-        broadcast::channel(1024);
+    let (event_tx, _event_rx): (broadcast::Sender<MarketEvent>, _) = broadcast::channel(1024);
 
     // mpsc channel for CLOB WS token subscriptions (gamma → clob_ws).
     let (clob_sub_tx, clob_sub_rx) = mpsc::channel::<Vec<String>>(64);
 
     // Step 7: Spawn RTDS Binance feed — separate WS connection.
-    let (binance_tx, _binance_rx) =
-        broadcast::channel::<feeds::rtds_binance::BinanceTick>(256);
+    let (binance_tx, _binance_rx) = broadcast::channel::<feeds::rtds_binance::BinanceTick>(256);
     tokio::spawn(feeds::rtds_binance::run(
         cfg.network.rtds_url.clone(),
         cfg.network.rtds_ping_interval_secs,
@@ -214,7 +212,9 @@ async fn main() -> Result<()> {
         dash_state: dash_state.clone(),
     }));
 
-    info!("All tasks spawned — Feeds, Maker, Standard AI, Arb Scanner, Redeemer, Merger, Dashboard");
+    info!(
+        "All tasks spawned — Feeds, Maker, Standard AI, Arb Scanner, Redeemer, Merger, Dashboard"
+    );
     info!("MANTIS is live. Waiting for Ctrl-C to shut down...");
 
     tokio::signal::ctrl_c().await?;

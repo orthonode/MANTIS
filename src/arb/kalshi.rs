@@ -52,7 +52,10 @@ const KALSHI_BASE: &str = "https://trading.kalshi.com/trade-api/v2";
 ///
 /// Returns empty vec on any error (arb scanner treats this as no opportunities).
 pub async fn fetch_markets(http: &Client, keyword: &str) -> Vec<KalshiMarket> {
-    let url = format!("{}/markets?status=active&limit=50&keyword={}", KALSHI_BASE, keyword);
+    let url = format!(
+        "{}/markets?status=active&limit=50&keyword={}",
+        KALSHI_BASE, keyword
+    );
 
     let raw = match http
         .get(&url)
@@ -112,11 +115,7 @@ pub struct KalshiSession {
 
 /// Authenticate with Kalshi and return a session token.
 /// Required for order placement. Not needed for market reads.
-pub async fn authenticate(
-    http: &Client,
-    email: &str,
-    password: &str,
-) -> Result<KalshiSession> {
+pub async fn authenticate(http: &Client, email: &str, password: &str) -> Result<KalshiSession> {
     if email.is_empty() || password.is_empty() {
         anyhow::bail!("Kalshi credentials not set — arb auto-execution unavailable");
     }

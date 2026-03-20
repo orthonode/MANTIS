@@ -12,13 +12,13 @@
 //! Redemption window: up to 60 seconds after resolution event.
 //! After that, shares can still be redeemed manually but auto-redeem gives up.
 
+use crate::dashboard::tui::SharedDashState;
 use crate::markets::state::{MarketEvent, MarketState};
 use crate::trader::executor::OpenPosition;
-use crate::dashboard::tui::SharedDashState;
 use anyhow::Result;
 use rust_decimal::Decimal;
 use tokio::sync::broadcast;
-use tokio::time::{Duration, timeout};
+use tokio::time::{timeout, Duration};
 use tracing::{error, info, warn};
 
 // ── Redeemer task ─────────────────────────────────────────────────────────────
@@ -47,7 +47,10 @@ pub async fn run(
 
     loop {
         match event_rx.recv().await {
-            Ok(MarketEvent::MarketResolved { condition_id, outcome }) => {
+            Ok(MarketEvent::MarketResolved {
+                condition_id,
+                outcome,
+            }) => {
                 if let Some((_id, pos)) = positions.remove(&condition_id) {
                     let won = pos.direction == outcome;
                     if won {
@@ -114,7 +117,11 @@ pub async fn run(
 /// Redeem winning shares for USDC. Returns the USDC amount received.
 ///
 /// Paper stub — real implementation requires CLOB SDK call.
-async fn redeem_position(pos: &OpenPosition, _clob_url: &str, _private_key: &str) -> Result<Decimal> {
+async fn redeem_position(
+    pos: &OpenPosition,
+    _clob_url: &str,
+    _private_key: &str,
+) -> Result<Decimal> {
     // TODO(P6): actual SDK redemption:
     //   let signer = LocalSigner::from_str(private_key)?;
     //   let client = ClobClient::new(clob_url, signer).authenticate().await?;

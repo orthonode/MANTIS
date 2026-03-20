@@ -36,7 +36,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tokio::time::{Duration, interval};
+use tokio::time::{interval, Duration};
 use tracing::{error, info, warn};
 
 // ── MakerDeps ─────────────────────────────────────────────────────────────────
@@ -213,7 +213,11 @@ async fn enter_new_markets(
         };
 
         // Fetch fee before quoting.
-        let fee_bps = match ctx.fee_cache.get_fee_bps(ctx.http, &snap.condition_id).await {
+        let fee_bps = match ctx
+            .fee_cache
+            .get_fee_bps(ctx.http, &snap.condition_id)
+            .await
+        {
             Ok(bps) => bps,
             Err(e) => {
                 error!(
@@ -255,7 +259,8 @@ async fn enter_new_markets(
             fee_bps,
             ctx.clob_url,
             ctx.private_key,
-        ).await;
+        )
+        .await;
 
         let ask_id = place_maker_order_stub(
             &snap.condition_id,
@@ -265,16 +270,20 @@ async fn enter_new_markets(
             fee_bps,
             ctx.clob_url,
             ctx.private_key,
-        ).await;
+        )
+        .await;
 
-        active_quotes.insert(snap.condition_id.clone(), ActiveQuote {
-            condition_id: snap.condition_id.clone(),
-            bid_order_id: bid_id,
-            ask_order_id: ask_id,
-            bid_price: quote.bid,
-            ask_price: quote.ask,
-            size_per_side: cfg.max_per_side_usd,
-        });
+        active_quotes.insert(
+            snap.condition_id.clone(),
+            ActiveQuote {
+                condition_id: snap.condition_id.clone(),
+                bid_order_id: bid_id,
+                ask_order_id: ask_id,
+                bid_price: quote.bid,
+                ask_price: quote.ask,
+                size_per_side: cfg.max_per_side_usd,
+            },
+        );
     }
 }
 
@@ -342,22 +351,37 @@ async fn run_replace_cycle(
 
                 // Place fresh quotes.
                 let bid_id = place_maker_order_stub(
-                    &condition_id, "BID", new_quote.bid, active.size_per_side,
-                    fee_bps, ctx.clob_url, ctx.private_key,
-                ).await;
+                    &condition_id,
+                    "BID",
+                    new_quote.bid,
+                    active.size_per_side,
+                    fee_bps,
+                    ctx.clob_url,
+                    ctx.private_key,
+                )
+                .await;
                 let ask_id = place_maker_order_stub(
-                    &condition_id, "ASK", new_quote.ask, active.size_per_side,
-                    fee_bps, ctx.clob_url, ctx.private_key,
-                ).await;
+                    &condition_id,
+                    "ASK",
+                    new_quote.ask,
+                    active.size_per_side,
+                    fee_bps,
+                    ctx.clob_url,
+                    ctx.private_key,
+                )
+                .await;
 
-                active_quotes.insert(condition_id.clone(), ActiveQuote {
-                    condition_id: condition_id.clone(),
-                    bid_order_id: bid_id,
-                    ask_order_id: ask_id,
-                    bid_price: new_quote.bid,
-                    ask_price: new_quote.ask,
-                    size_per_side: active.size_per_side,
-                });
+                active_quotes.insert(
+                    condition_id.clone(),
+                    ActiveQuote {
+                        condition_id: condition_id.clone(),
+                        bid_order_id: bid_id,
+                        ask_order_id: ask_id,
+                        bid_price: new_quote.bid,
+                        ask_price: new_quote.ask,
+                        size_per_side: active.size_per_side,
+                    },
+                );
             }
         }
     }

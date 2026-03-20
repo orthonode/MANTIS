@@ -67,5 +67,4 @@ impl FeeCache {
             .insert(condition_id.to_string(), (bps, Instant::now()));
         Ok(bps)
     }
-
 }
